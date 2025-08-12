@@ -67,10 +67,11 @@ Position initiale : 0.1G en X+, 0.2G en Y-
 ### Scénario 2 : Changement d'orientation
 ```
 Écran à plat → Écran vertical
-→ Détection : Axe de gravité passe de Z à Y
-→ Adaptation : Plan affiché passe de XY à XZ
-→ Recalage : Nouvelle position devient 0G pour tous les axes
+→ Détection : Aucune détection automatique pendant le fonctionnement
+→ Adaptation : L'axe de gravité reste celui détecté au démarrage
+→ Recalage : Seulement lors d'un appui long explicite
 ```
+
 
 ### Scénario 3 : Appui long de recalage
 ```
