@@ -18,13 +18,11 @@
 - **Grille circulaire** : Graduations de 0.5G à 2.0G
 - **Valeurs maximales** : Affichage des pics sur chaque axe (avant, arrière, gauche, droite)
 - **Pic total XYZ** : Magnitude maximale des forces G cumulées
-- **Logo intégré** : Affiché en bas à gauche, rogné en cercle sans fond
 
 ### Calibration 0G intelligente
 - **Calibration complète sur tous les axes** : X, Y, Z simultanément
 - **Démarrage automatique** : Calibration moyenne sur 50 échantillons
 - **Appui long** : Reset des valeurs max + recalibration depuis la position actuelle
-- **Détection automatique d'orientation** : Adaptation automatique lors des changements d'axe de gravité
 
 ### Contrôles
 - **Appui long** : Reset des pics + recalibration 0G + double bip
@@ -52,7 +50,6 @@
 - **Inversion Y** : Correction avant/arrière
 
 - **Deltas calculés** : Mouvements relatifs à la position de référence
-- **Adaptation continue** : Nouveau 0G lors des changements d'orientation
 
 ## Exemples de fonctionnement
 
