@@ -44,24 +44,15 @@ static inline void draw_logo_bottom_left(lv_obj_t *parent) {
         if (d < 8) d = 8;
         lv_obj_set_size(logo_holder, d, d);
 
-        // Placement dans le disque visible
-        int32_t parent_w = lv_obj_get_width(parent);
-        int32_t parent_h = lv_obj_get_height(parent);
-        int32_t radius = (parent_w < parent_h ? parent_w : parent_h) / 2;
-        int32_t half_size = d / 2;
-        float theta = 225.0f * (float)M_PI / 180.0f;
-        float r = (float)(radius - half_size - margin);
-        if (r < 0) r = 0;
-        int dx = (int)(cosf(theta) * r);
-        int dy = (int)(sinf(theta) * r);
-        lv_obj_align(logo_holder, LV_ALIGN_CENTER, dx, dy);
+        // Placement au centre de l'écran
+        lv_obj_align(logo_holder, LV_ALIGN_CENTER, 0, 0);
 
         // Centrage et rendu
         lv_obj_center(logo_img);
         lv_obj_clear_flag(logo_holder, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_clear_flag(logo_img, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_style_opa(logo_img, 160, 0);
-        lv_obj_move_foreground(logo_holder);
+        // Logo reste en arrière-plan (pas de move_foreground)
     }
 }
 
@@ -92,13 +83,13 @@ static lv_obj_t *label_right = NULL;     // droite
 // Orientation (corrige axes inversés)
 #define GM_SWAP_XY   1
 #define GM_INVERT_X  1  // inverser X (droite/gauche)
-#define GM_INVERT_Y  0  // inverser Y (avant/arrière)
+#define GM_INVERT_Y  1  // inverser Y (avant/arrière) - corrigé pour mode vertical
 
 // Apparence
 #define POINT_SIZE        16          // Taille du point blanc (px)
-#define RED_STAIN_OPA     LV_OPA_70   // Opacité coeur de la zone rouge
-#define STAIN_RADIUS      10          // Rayon coeur (px)
-#define STAIN_SOFT_EDGE   4           // Bord doux supplémentaire (px)
+#define RED_STAIN_OPA     LV_OPA_60   // Opacité coeur de la zone rouge (réduite pour performance)
+#define STAIN_RADIUS      8           // Rayon coeur (px) (réduit pour performance)
+#define STAIN_SOFT_EDGE   2           // Bord doux supplémentaire (px) (réduit pour performance)
 
 // Buffers canvas -> alloués dynamiquement (PSRAM si dispo)
 static lv_color_t   *grid_canvas_buf  = NULL;   // TRUE_COLOR (16-bit)
@@ -151,8 +142,8 @@ static inline void get_deltas(float rx, float ry, float rz, float *u_d, float *v
     // Conversion en composantes du plan choisi (u, v) et axe orthogonal (w)
     if (gravity_axis == 2) {         // gravité ~ Z  => plan XY
         *u_d = dx; *v_d = dy; *w_d = dz;
-    } else if (gravity_axis == 1) {  // gravité ~ Y  => plan XZ
-        *u_d = dx; *v_d = dz; *w_d = dy;
+    } else if (gravity_axis == 1) {  // gravité ~ Y  => plan XZ (mode vertical)
+        *u_d = dx; *v_d = dz; *w_d = dy;  // Pas d'inversion de l'axe Z
     } else {                         // gravité ~ X  => plan YZ
         *u_d = dy; *v_d = dz; *w_d = dx;
     }
@@ -207,16 +198,9 @@ static void G_Meter_Draw_Grid(void) {
     }
 }
 
-// Zone parcourue rouge avec bord doux
+// Zone parcourue rouge optimisée pour performance
 static void Stain_Add_Dot(int x, int y) {
-    // Couronne douce (opacité faible)
-    if (STAIN_SOFT_EDGE > 0) {
-        lv_draw_rect_dsc_t soft; lv_draw_rect_dsc_init(&soft);
-        soft.bg_color = lv_color_hex(0xFF0000); soft.bg_opa = LV_OPA_20; soft.radius = STAIN_RADIUS + STAIN_SOFT_EDGE;
-        int d = (STAIN_RADIUS + STAIN_SOFT_EDGE) * 2;
-        lv_canvas_draw_rect(stain_canvas, x - (d/2), y - (d/2), d, d, &soft);
-    }
-    // Coeur plus opaque
+    // Dessin direct sans bord doux pour plus de rapidité
     lv_draw_rect_dsc_t core; lv_draw_rect_dsc_init(&core);
     core.bg_color = lv_color_hex(0xFF0000); core.bg_opa = RED_STAIN_OPA; core.radius = STAIN_RADIUS;
     int dc = STAIN_RADIUS * 2;
@@ -236,14 +220,14 @@ static void update_peak_labels(void) {
 
 // Calibrage: moyenne sur N échantillons pour définir la baseline + détection d’axe de gravité
 static void perform_calibration(void) {
-    const int samples = 50;
+    const int samples = 30;  // Réduit de 50 à 30 pour plus de rapidité
     float sx = 0, sy = 0, sz = 0;
     for (int i = 0; i < samples; i++) {
         sx += Accel.x; sy += Accel.y; sz += Accel.z;
 #ifdef ARDUINO_ARCH_ESP32
-        vTaskDelay(pdMS_TO_TICKS(5));
+        vTaskDelay(pdMS_TO_TICKS(2));  // Réduit de 5ms à 2ms
 #else
-        delay(5);
+        delay(2);
 #endif
     }
     base_raw_x = sx / samples;
@@ -352,8 +336,11 @@ void G_Meter_Create(lv_obj_t *parent) {
     grid_canvas_buf = (lv_color_t *)malloc(480 * 480 * sizeof(lv_color_t));
 #endif
     if (!grid_canvas_buf) { grid_canvas_buf = (lv_color_t *)malloc(240 * 240 * sizeof(lv_color_t)); lv_canvas_set_buffer(grid_canvas, grid_canvas_buf, 240, 240, LV_IMG_CF_TRUE_COLOR); lv_obj_set_size(grid_canvas, 240, 240); }
-    else { lv_canvas_set_buffer(grid_canvas, grid_canvas_buf, 480, 480, LV_IMG_CF_TRUE_COLOR); }
+    else {     lv_canvas_set_buffer(grid_canvas, grid_canvas_buf, 480, 480, LV_IMG_CF_TRUE_COLOR); }
     G_Meter_Draw_Grid();
+
+    // Dessiner le logo intégré au centre - au-dessus de la grille, en-dessous de la tache rouge
+    draw_logo_bottom_left(g_meter_container);
 
     stain_canvas = lv_canvas_create(g_meter_container);
     lv_obj_set_size(stain_canvas, 480, 480); lv_obj_align(stain_canvas, LV_ALIGN_CENTER, 0, 0);
@@ -396,9 +383,6 @@ void G_Meter_Create(lv_obj_t *parent) {
     perform_calibration();
     short_double_beep();
 
-    // Dessiner le logo intégré en bas à gauche (firmware)
-    draw_logo_bottom_left(g_meter_container);
-
     update_peak_labels();
 }
 
@@ -406,32 +390,7 @@ void G_Meter_Update(void) {
     // Valeurs courantes
     g_current_values.x = Accel.x; g_current_values.y = Accel.y; g_current_values.z = Accel.z;
 
-    // Détection automatique d'un changement d'axe de gravité (ex: Y ↔ Z) et recalage 0G immédiat
-    {
-        static int frames_since_check = 0;
-        frames_since_check++;
-        if (frames_since_check >= 10) { // vérifie ~toutes les 10 itérations
-            frames_since_check = 0;
-            float ax = fabsf(g_current_values.x);
-            float ay = fabsf(g_current_values.y);
-            float az = fabsf(g_current_values.z);
-            float gmag = sqrtf(ax*ax + ay*ay + az*az);
-            if (gmag > 0.2f) { // éviter les divisions instables
-                float nx = ax / gmag, ny = ay / gmag, nz = az / gmag;
-                const float TH = 0.85f; // axe dominant clair
-                int cand = -1;
-                if (nz >= TH) cand = 2; else if (ny >= TH) cand = 1; else if (nx >= TH) cand = 0;
-                if (cand >= 0 && cand != gravity_axis) {
-                    gravity_axis = cand;
-                    // Calage 0G instantané depuis l'inclinaison actuelle (comme demandé)
-                    base_raw_x = g_current_values.x;
-                    base_raw_y = g_current_values.y;
-                    base_raw_z = g_current_values.z;
-                    has_baseline = true;
-                }
-            }
-        }
-    }
+
 
     // Deltas (u_d, v_d, w_d) suivant l’axe de gravité détecté
     float u_d, v_d, w_d; get_deltas(g_current_values.x, g_current_values.y, g_current_values.z, &u_d, &v_d, &w_d);
