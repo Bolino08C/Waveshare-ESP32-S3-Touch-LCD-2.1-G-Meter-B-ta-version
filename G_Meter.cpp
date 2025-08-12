@@ -16,19 +16,19 @@ static const uint32_t logo64_placeholder[] PROGMEM = { 0x00000000 };
 static inline void draw_logo_bottom_left(lv_obj_t *parent) {
     const int target_w = 64; // largeur visée pour le logo
     const int margin = 12;   // marge pour rester dans le disque
-    const int pad = 6;       // marge interne du fond rond (px)
-    static lv_obj_t *logo_bg = NULL;
+    static lv_obj_t *logo_holder = NULL;
     static lv_obj_t *logo_img = NULL;
-    if (!logo_bg && !logo_img) {
-        // Fond rond blanc semi-transparent
-        logo_bg = lv_obj_create(parent);
-        lv_obj_set_style_border_width(logo_bg, 0, 0);
-        lv_obj_set_style_pad_all(logo_bg, 0, 0);
-        lv_obj_set_style_bg_color(logo_bg, lv_color_white(), 0);
-        lv_obj_set_style_bg_opa(logo_bg, 120, 0);
+    if (!logo_holder && !logo_img) {
+        // Conteneur transparent qui clippe en cercle
+        logo_holder = lv_obj_create(parent);
+        lv_obj_set_style_border_width(logo_holder, 0, 0);
+        lv_obj_set_style_pad_all(logo_holder, 0, 0);
+        lv_obj_set_style_bg_opa(logo_holder, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_radius(logo_holder, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_clip_corner(logo_holder, true, 0);
 
-        // Image centrée dans le fond
-        logo_img = lv_img_create(logo_bg);
+        // Image centrée dans le conteneur
+        logo_img = lv_img_create(logo_holder);
         lv_img_set_src(logo_img, &logo_b08c_img);
 
         // Zoom pour viser ~64 px de large
@@ -37,32 +37,31 @@ static inline void draw_logo_bottom_left(lv_obj_t *parent) {
         if (zoom > 256) zoom = 256; if (zoom == 0) zoom = 1;
         lv_img_set_zoom(logo_img, zoom);
 
-        // Dimension du fond circulaire
+        // Dimension du conteneur circulaire = taille du logo zoomé
         int32_t eff_w = (base_w * zoom) / 256;
         int32_t eff_h = (logo_b08c_img.header.h * zoom) / 256;
-        int32_t bg_d = (eff_w > eff_h ? eff_w : eff_h) + pad * 2;
-        if (bg_d < 8) bg_d = 8;
-        lv_obj_set_size(logo_bg, bg_d, bg_d);
-        lv_obj_set_style_radius(logo_bg, bg_d / 2, 0);
+        int32_t d = (eff_w > eff_h ? eff_w : eff_h);
+        if (d < 8) d = 8;
+        lv_obj_set_size(logo_holder, d, d);
 
         // Placement dans le disque visible
         int32_t parent_w = lv_obj_get_width(parent);
         int32_t parent_h = lv_obj_get_height(parent);
         int32_t radius = (parent_w < parent_h ? parent_w : parent_h) / 2;
-        int32_t half_size = bg_d / 2;
+        int32_t half_size = d / 2;
         float theta = 225.0f * (float)M_PI / 180.0f;
         float r = (float)(radius - half_size - margin);
         if (r < 0) r = 0;
         int dx = (int)(cosf(theta) * r);
         int dy = (int)(sinf(theta) * r);
-        lv_obj_align(logo_bg, LV_ALIGN_CENTER, dx, dy);
+        lv_obj_align(logo_holder, LV_ALIGN_CENTER, dx, dy);
 
         // Centrage et rendu
         lv_obj_center(logo_img);
-        lv_obj_clear_flag(logo_bg, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(logo_holder, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_clear_flag(logo_img, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_style_opa(logo_img, 160, 0);
-        lv_obj_move_foreground(logo_bg);
+        lv_obj_move_foreground(logo_holder);
     }
 }
 
@@ -107,8 +106,7 @@ static lv_color32_t *stain_canvas_buf = NULL;   // TRUE_COLOR_ALPHA (32-bit)
 static lv_color32_t *point_canvas_buf = NULL;   // TRUE_COLOR_ALPHA (32-bit)
 
 // Baseline (calibrage) pour centrer le 0G à la position initiale
-static float base_raw_x = 0.0f, base_raw_y = 0.0f, base_raw_z = 0.0f;   // base en repère capteur
-static float base_map_x = 0.0f, base_map_y = 0.0f;                       // base mappée sur l’écran pour le plan sélectionné
+static float base_raw_x = 0.0f, base_raw_y = 0.0f, base_raw_z = 0.0f;   // base en repère capteur (tous axes)
 static bool  has_baseline = false;
 
 // Axe principal de gravité détecté sur la baseline: 0=X, 1=Y, 2=Z
@@ -145,18 +143,19 @@ static inline void get_plane_uv_from_raw(float rx, float ry, float rz, float *u,
 
 // Calcule les deltas du plan (u_d, v_d) et de l'axe orthogonal (w_d) par rapport à la baseline
 static inline void get_deltas(float rx, float ry, float rz, float *u_d, float *v_d, float *w_d) {
-    float u, v; get_plane_uv_from_raw(rx, ry, rz, &u, &v);
-    // baseline mappée déjà convertie en base_map_x/base_map_y
-    if (has_baseline) { u -= base_map_x; v -= base_map_y; }
-
-    // w_d: delta sur l'axe de gravité (orthogonal au plan)
+    // Calcul des deltas bruts par rapport à la baseline complète (tous axes)
     float dx = rx - base_raw_x;
     float dy = ry - base_raw_y;
     float dz = rz - base_raw_z;
-    float w = 0.0f;
-    if (gravity_axis == 2) w = dz; else if (gravity_axis == 1) w = dy; else w = dx;
 
-    *u_d = u; *v_d = v; *w_d = w;
+    // Conversion en composantes du plan choisi (u, v) et axe orthogonal (w)
+    if (gravity_axis == 2) {         // gravité ~ Z  => plan XY
+        *u_d = dx; *v_d = dy; *w_d = dz;
+    } else if (gravity_axis == 1) {  // gravité ~ Y  => plan XZ
+        *u_d = dx; *v_d = dz; *w_d = dy;
+    } else {                         // gravité ~ X  => plan YZ
+        *u_d = dy; *v_d = dz; *w_d = dx;
+    }
 }
 
 // Sélectionne la plus grande police dispo
@@ -262,10 +261,6 @@ static void perform_calibration(void) {
     else {
         // garder l’axe précédent si incertain
     }
-
-    // Baseline mappée vers le plan choisi puis swap/invert dynamique
-    float base_u, base_v; get_plane_uv_from_raw(base_raw_x, base_raw_y, base_raw_z, &base_u, &base_v);
-    apply_mapping(base_u, base_v, &base_map_x, &base_map_y);
 
     has_baseline = true;
 }
@@ -410,6 +405,33 @@ void G_Meter_Create(lv_obj_t *parent) {
 void G_Meter_Update(void) {
     // Valeurs courantes
     g_current_values.x = Accel.x; g_current_values.y = Accel.y; g_current_values.z = Accel.z;
+
+    // Détection automatique d'un changement d'axe de gravité (ex: Y ↔ Z) et recalage 0G immédiat
+    {
+        static int frames_since_check = 0;
+        frames_since_check++;
+        if (frames_since_check >= 10) { // vérifie ~toutes les 10 itérations
+            frames_since_check = 0;
+            float ax = fabsf(g_current_values.x);
+            float ay = fabsf(g_current_values.y);
+            float az = fabsf(g_current_values.z);
+            float gmag = sqrtf(ax*ax + ay*ay + az*az);
+            if (gmag > 0.2f) { // éviter les divisions instables
+                float nx = ax / gmag, ny = ay / gmag, nz = az / gmag;
+                const float TH = 0.85f; // axe dominant clair
+                int cand = -1;
+                if (nz >= TH) cand = 2; else if (ny >= TH) cand = 1; else if (nx >= TH) cand = 0;
+                if (cand >= 0 && cand != gravity_axis) {
+                    gravity_axis = cand;
+                    // Calage 0G instantané depuis l'inclinaison actuelle (comme demandé)
+                    base_raw_x = g_current_values.x;
+                    base_raw_y = g_current_values.y;
+                    base_raw_z = g_current_values.z;
+                    has_baseline = true;
+                }
+            }
+        }
+    }
 
     // Deltas (u_d, v_d, w_d) suivant l’axe de gravité détecté
     float u_d, v_d, w_d; get_deltas(g_current_values.x, g_current_values.y, g_current_values.z, &u_d, &v_d, &w_d);
